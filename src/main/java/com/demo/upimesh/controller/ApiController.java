@@ -48,23 +48,64 @@ public class ApiController {
      * Demo helper: build a packet on the server (simulating a sender phone)
      * and inject it into the mesh at the given device.
      */
-    @PostMapping("/demo/send")
-    public ResponseEntity<?> demoSend(@RequestBody DemoSendRequest req) throws Exception {
-        MeshPacket packet = demo.createPacket(
-                req.senderVpa, req.receiverVpa, req.amount, req.pin,
-                req.ttl == null ? 5 : req.ttl);
+   @PostMapping("/demo/send")
+public ResponseEntity<?> demoSend(@RequestBody DemoSendRequest req) throws Exception {
 
-        String startDevice = req.startDevice == null ? "phone-alice" : req.startDevice;
-        mesh.inject(startDevice, packet);
-
-        return ResponseEntity.ok(Map.of(
-                "packetId", packet.getPacketId(),
-                "ciphertextPreview", packet.getCiphertext().substring(0, 64) + "...",
-                "ttl", packet.getTtl(),
-                "injectedAt", startDevice
-        ));
+    // Basic payment validation
+    if (req.senderVpa == null || req.senderVpa.isBlank()) {
+        return ResponseEntity.badRequest()
+                .body(Map.of("error", "Sender VPA is required"));
     }
 
+    if (req.receiverVpa == null || req.receiverVpa.isBlank()) {
+        return ResponseEntity.badRequest()
+                .body(Map.of("error", "Receiver VPA is required"));
+    }
+
+    if (req.senderVpa.equals(req.receiverVpa)) {
+        return ResponseEntity.badRequest()
+                .body(Map.of("error", "Sender and receiver cannot be the same"));
+    }
+
+    if (req.amount == null || req.amount.compareTo(BigDecimal.ZERO) <= 0) {
+        return ResponseEntity.badRequest()
+                .body(Map.of("error", "Payment amount must be greater than ₹0"));
+    }
+
+    if (req.pin == null || !req.pin.matches("\\d{4}")) {
+        return ResponseEntity.badRequest()
+                .body(Map.of("error", "PIN must be exactly 4 digits"));
+    }
+
+    int ttl = req.ttl == null ? 5 : req.ttl;
+
+    if (ttl <= 0 || ttl > 10) {
+        return ResponseEntity.badRequest()
+                .body(Map.of("error", "TTL must be between 1 and 10"));
+    }
+
+    // Create and inject the validated payment packet
+    MeshPacket packet = demo.createPacket(
+            req.senderVpa,
+            req.receiverVpa,
+            req.amount,
+            req.pin,
+            ttl
+    );
+
+    String startDevice =
+            req.startDevice == null ? "phone-alice" : req.startDevice;
+
+    mesh.inject(startDevice, packet);
+
+    return ResponseEntity.ok(Map.of(
+            "packetId", packet.getPacketId(),
+            "ciphertextPreview",
+            packet.getCiphertext().substring(0, 64) + "...",
+            "ttl", packet.getTtl(),
+            "injectedAt", startDevice
+    ));
+}
     public static class DemoSendRequest {
         public String senderVpa;
         public String receiverVpa;
